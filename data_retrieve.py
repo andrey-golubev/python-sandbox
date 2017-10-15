@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 
-def parse_and_prepare(url=None, sep=None, engine=None):
+def parse_and_prepare(url=None, sep=None, engine=None, normalize=True):
     raw_data = pd.read_csv("armenian_pubs.csv", sep=",", engine="python")
     raw_data.columns = map(str.lower, raw_data.columns) # all columns to lower case
     data = raw_data.drop('timestamp', axis=1)
@@ -30,7 +30,11 @@ def parse_and_prepare(url=None, sep=None, engine=None):
     data_without_y = data[['age', 'income']]
     numerical_cols.remove('wts')
     data_numerical = data_without_y[numerical_cols]
-    data_numerical = (data_numerical - data_numerical.mean(axis = 0))/data_numerical.std(axis = 0)
+    if normalize is True:
+        from sklearn import preprocessing
+        min_max_scaler = preprocessing.MinMaxScaler()
+        data_numerical = pd.DataFrame(min_max_scaler.fit_transform(data_numerical))
+    # data_numerical = (data_numerical - data_numerical.mean(axis = 0))/data_numerical.std(axis = 0)
     data_concat = pd.concat((data_numerical, data_nonbinary, data[binary_cols]), axis=1)
     return data_concat, data
 
