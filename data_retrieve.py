@@ -34,6 +34,7 @@ def parse_and_prepare(url=None, sep=None, engine=None, normalize=True):
         from sklearn import preprocessing
         min_max_scaler = preprocessing.MinMaxScaler()
         data_numerical = pd.DataFrame(min_max_scaler.fit_transform(data_numerical))
+        data_numerical.columns = ['age', 'income']
     # data_numerical = (data_numerical - data_numerical.mean(axis = 0))/data_numerical.std(axis = 0)
     data_concat = pd.concat((data_numerical, data_nonbinary, data[binary_cols]), axis=1)
     return data_concat, data
