@@ -3,3 +3,4 @@
 *.log
 metastore_db
 __pycache__
+.idea/
