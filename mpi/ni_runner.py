@@ -31,14 +31,17 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     debug_str = '--debug' if args.debug else ''
-    host_str = f'-host {args.host}' if args.host is not None else ''
+    # host_str = f'-host {args.host}' if args.host is not None else ''
+    host_str = '-host %s' % args.host if args.host is not None else ''
 
     exec_outputs = []
     for num_jobs in args.jobs:
         for method in args.methods:
             num_jobs = int(num_jobs)
-            command = f"{args.mpiexec} -n {num_jobs} {host_str} {args.python} numerical_integration.py " \
-                      f"--method={method} --step={args.step} {debug_str}"
+            command = "%s -n %d %s %s numerical_integration.py --method=%s --step=%f" %\
+                      (args.mpiexec, num_jobs, host_str, args.python, method, args.step)
+            # command = f"{args.mpiexec} -n {num_jobs} {host_str} {args.python} numerical_integration.py " \
+            #           f"--method={method} --step={args.step} {debug_str}"
             cmd_args = shlex.split(command)
 
             elapsed_list = []
