@@ -68,4 +68,6 @@ if __name__ == "__main__":
         writer = csv.writer(csvfile, delimiter=';')
         writer.writerow(['Error', 'Step', 'Method', 'Job Number', 'Avg. Time', 'Avg. Value'])
         for out in exec_outputs:
-            writer.writerow([value for key, value in out.items()])
+            out_list = [value for key, value in out.items()]
+            writer.writerow(out_list)
+            print(out_list)
