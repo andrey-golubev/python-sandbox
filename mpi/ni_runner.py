@@ -6,6 +6,9 @@ import time
 from functools import reduce
 
 parser = argparse.ArgumentParser(description='')
+parser.add_argument('--python', default='python3.6', type=str)
+parser.add_argument('--mpiexec', default='mpiexec', type=str)
+parser.add_argument('--host', default=None)
 parser.add_argument('--jobs', default=[2], nargs='+',
                     help='List of jobs amount to run\n'
                          'Example: 2 3 4 5 6\n'
@@ -28,12 +31,13 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     debug_str = '--debug' if args.debug else ''
+    host_str = f'-host {args.host}' if args.host is not None else ''
 
     exec_outputs = []
     for num_jobs in args.jobs:
         for method in args.methods:
             num_jobs = int(num_jobs)
-            command = f"mpiexec -n {num_jobs} python3.6 numerical_integration.py " \
+            command = f"{args.mpiexec} -n {num_jobs} {host_str} {args.python} numerical_integration.py " \
                       f"--method={method} --step={args.step} {debug_str}"
             cmd_args = shlex.split(command)
 
@@ -64,10 +68,13 @@ if __name__ == "__main__":
                 'avg_value': get_avg(values, args.times)
             })
 
+    for out in exec_outputs:
+        out_list = [value for key, value in out.items()]
+        print(out_list)
+
     with open(args.out_csv_file, 'w', newline='') as csvfile:
         writer = csv.writer(csvfile, delimiter=';')
         writer.writerow(['Error', 'Step', 'Method', 'Job Number', 'Avg. Time', 'Avg. Value'])
         for out in exec_outputs:
             out_list = [value for key, value in out.items()]
             writer.writerow(out_list)
-            print(out_list)
