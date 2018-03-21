@@ -6,6 +6,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
+from utils.flops_benchmark import add_flops_counting_methods
+
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
@@ -68,6 +70,7 @@ class Net(nn.Module):
         return F.log_softmax(x, dim=1)
 
 model = Net()
+model = add_flops_counting_methods(model)
 if args.cuda:
     model.cuda()
 
@@ -110,4 +113,7 @@ def test():
 
 for epoch in range(1, args.epochs + 1):
     train(epoch)
+    model.start_flops_count()
     test()
+    print('FLOPS:', model.compute_average_flops_cost())
+    print('GFLOPS:', model.compute_average_flops_cost() / 1e9 / 2)
