@@ -181,7 +181,7 @@ def main():
 
     # for fwd_callback, desc, init in forward_pass_metadata:
         # full_iteration(fwd_callback, desc, init)
-    for out_size in [1, 5, 10]:
+    for out_size in [1, 3, 5, 10, 15]:
         full_iteration(out_size)
 
 main()
