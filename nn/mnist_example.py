@@ -52,24 +52,25 @@ test_loader = torch.utils.data.DataLoader(
 
 
 class Net(nn.Module):
-    def __init__(self, fwd_pass_clb, conv1):
+    def __init__(self, conv1_out_size):  # fwd_pass_clb, init_clb):
         super(Net, self).__init__()
-        self._fwd_pass_clb = fwd_pass_clb
-        self.conv1 = conv1  # nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+        # self._fwd_pass_clb = fwd_pass_clb
+        # init_clb(self)
+        self.conv1 = nn.Conv2d(1, conv1_out_size, kernel_size=5)
+        self.conv2 = nn.Conv2d(conv1_out_size, 20, kernel_size=5)
         self.conv2_drop = nn.Dropout2d()
         self.fc1 = nn.Linear(320, 50)
         self.fc2 = nn.Linear(50, 10)
 
     def forward(self, x):
-        return self._fwd_pass_clb(self, x)
-        # x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        # x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        # x = x.view(-1, 320)
-        # x = F.relu(self.fc1(x))
-        # x = F.dropout(x, training=self.training)
-        # x = self.fc2(x)
-        # return F.log_softmax(x, dim=1)
+        # return self._fwd_pass_clb(self, x)
+        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+        x = x.view(-1, 320)
+        x = F.relu(self.fc1(x))
+        x = F.dropout(x, training=self.training)
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
 
 
 def train(model, optimizer, epoch):
@@ -87,6 +88,7 @@ def train(model, optimizer, epoch):
         #     print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
         #         epoch, batch_idx * len(data), len(train_loader.dataset),
         #         100. * batch_idx / len(train_loader), loss.data[0]))
+
 
 def test(model):
     model.eval()
@@ -108,8 +110,9 @@ def test(model):
 
 
 
-def full_iteration(forward_pass_callback, conv1_instance):
-    model = Net(forward_pass_callback, conv1_instance)
+def full_iteration(conv1_out_size):  # forward_pass_callback, desc, init_clb):
+    # model = Net(forward_pass_callback, init_clb)
+    model = Net(conv1_out_size)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     model = add_flops_counting_methods(model)
     if args.cuda:
@@ -121,48 +124,64 @@ def full_iteration(forward_pass_callback, conv1_instance):
 
     # consider flops counting on test forward pass
     model.start_flops_count()
+    print('-'*100)
     test(model)
-    print('FLOPS:', model.compute_average_flops_cost(), '| GFLOPS:', model.compute_average_flops_cost() / 1e9 / 2)
+    print('FLOPS:', model.compute_average_flops_cost(), '| GFLOPS:', model.compute_average_flops_cost() / 1e9)
+    print('Model:', model)
+    # print('Architecture:', desc)
 
 
-# forward pass architectures:
-def arch1(model, x):
-    x = F.relu(F.max_pool2d(model.conv1(x), 2))
-    x = F.relu(F.max_pool2d(model.conv2_drop(model.conv2(x)), 2))
-    x = x.view(-1, 320) # is this a reduction of some kind?
-    x = F.relu(model.fc1(x))
-    x = F.dropout(x, training=model.training) # applying dropout ?
-    x = model.fc2(x)
-    return F.log_softmax(x, dim=1)
 
-
-# def arch2(model, x):
-
-
+########################################################################################################################
 def main():
-    def create_param_grid(architectures, conv1_layers):
-        metadata = []
-        for arch, desc in architectures:
-            for layer in conv1_layers:
-                metadata.append((arch, desc, layer))
-        return metadata
+    # def parameters1():
+    #     def arch(model, x):
+    #         x = F.relu(F.max_pool2d(model.conv1(x), 2))
+    #         x = F.relu(F.max_pool2d(model.conv2_drop(model.conv2(x)), 2))
+    #         x = x.view(-1, 320) # is this a reduction of some kind?
+    #         x = F.relu(model.fc1(x))
+    #         x = F.dropout(x, training=model.training) # applying dropout ?
+    #         x = model.fc2(x)
+    #         return F.log_softmax(x, dim=1)
+    #     desc = "conv -> pool -> act -> conv -> conv_drop -> pool -> act -> ? -> fc -> act -> dropout? -> fc -> softmax"
 
-    forward_pass_metadata = create_param_grid(
-        architectures = [
-            (arch1, "conv -> pool -> act -> conv -> conv_drop -> pool -> act -> ? -> fc -> act -> dropout? -> fc -> softmax")
-        ],
-        conv1_layers = [
-            nn.Conv2d(1, 10, kernel_size=5),
-            nn.Conv2d(1, 100, kernel_size=5),
-        ]
-    )
+    #     def init(model):
+    #         model.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+    #         model.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+    #         model.conv2_drop = nn.Dropout2d()
+    #         model.fc1 = nn.Linear(320, 50)
+    #         model.fc2 = nn.Linear(50, 10)
 
-    for fwd_callback, desc, conv1 in forward_pass_metadata:
-        print('-'*100)
-        full_iteration(fwd_callback, conv1)
-        print('1st Conv Layer:', conv1)
-        print('Architecture:', desc)
+    #     return arch, desc, init
 
+    # def parameters2():
+    #     def arch(model, x):
+    #         x = F.relu(F.max_pool2d(model.conv1(x), 2))
+    #         x = F.relu(F.max_pool2d(model.conv2_drop(model.conv2(x)), 2))
+    #         x = x.view(-1, 160) # is this a reduction of some kind?
+    #         x = F.relu(model.fc1(x))
+    #         x = F.dropout(x, training=model.training) # applying dropout ?
+    #         x = model.fc2(x)
+    #         return F.log_softmax(x, dim=1)
+    #     desc = "conv -> pool -> act -> conv -> conv_drop -> pool -> act -> ? -> fc -> act -> dropout? -> fc -> softmax"
 
-if __name__ == "__main__":
-    main()
+    #     def init(model):
+    #         model.conv1 = nn.Conv2d(1, 5, kernel_size=5)
+    #         model.conv2 = nn.Conv2d(5, 20, kernel_size=5)
+    #         model.conv2_drop = nn.Dropout2d()
+    #         model.fc1 = nn.Linear(160, 50)
+    #         model.fc2 = nn.Linear(50, 10)
+
+    #     return arch, desc, init
+
+    # forward_pass_metadata = [
+    #     parameters1(),
+    #     parameters2()
+    # ]
+
+    # for fwd_callback, desc, init in forward_pass_metadata:
+        # full_iteration(fwd_callback, desc, init)
+    for out_size in [1, 5, 10]:
+        full_iteration(out_size)
+
+main()
