@@ -142,6 +142,7 @@ def main_train():
 
 
 def main_load():
+    print('Loaded from: {0}'.format(model_file_path))
     data = mm.load_model(model_file_path)
     model = Network(10, 20)
     model.load_state_dict(data)
