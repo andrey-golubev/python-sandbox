@@ -1,6 +1,8 @@
 from __future__ import print_function
 import argparse
 import math
+import copy
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -167,23 +169,22 @@ def main_load():
 
 
 class Optimizer:
-    def __init__(self, model_initializer, baseline, params):
+    def __init__(self, model_initializer, baseline_acc, params):
         self._init_callable = model_initializer
-        self._baseline = baseline
+        self._baseline_acc = baseline_acc
         self._baseline_params = params
         self._best_score = (0.0, math.inf)
         self._best_params = None
         self._best_state_dict = None
         self._epsilon = 0.07
 
-
     def _decision_function(self, score1, score2):
-        b_acc, _ = baseline
+        b_acc, _ = self._baseline_acc
         (acc1, flops1), (acc2, flops2) = score1, score2
         bad1, bad2 = False, False
-        if math.abs(acc1 - b_acc) > self.epsilon:
+        if math.abs(acc1 - b_acc) > self._epsilon:
             bad1 = True
-        if math.abs(acc2 - b_acc) > self.epsilon:
+        if math.abs(acc2 - b_acc) > self._epsilon:
             bad2 = True
         if bad1 and bad2:
             return self._best_score, self._best_params
@@ -192,55 +193,162 @@ class Optimizer:
         if bad2 or flops1 < flops2:
             return score1
 
-
-    def _run_test(self, model_params, state):
+    def _run_test(self, state, model_params):
         model = self._init_callable(*model_params)
         model.load_state_dict(state)
         model = add_flops_counting_methods(model)
         model.start_flops_count()
         return test(model, printing=False), model.compute_average_flops_cost()
 
+    @staticmethod
+    def _reduce_state_opt(orig_state, indices, size_pos):
+        new_size = list(orig_state.size())
+        new_size[size_pos] = len(indices)
+        state = torch.FloatTensor(*new_size)
+        for i, target_i in enumerate(indices):
+            state[i] = orig_state[target_i]
+        return state
 
-    def optimize(self, model_state_dict, layers_to_optimize, layers_to_adjust):
-        for layer_to_opt, layer_to_adjust in zip(layers_to_optimize, layers_to_adjust):
-            local_state_dict = model_optim_state_dict
-            local_params = list(range(0, len(local_state_dict['{0}.weights'.format(layer_to_opt)])))
-            test_score = self._run_test(local_params, local_state_dict)
-            decided_score = self._decision_function(
-                self._best_score,
-                test_score
-            )
+    @staticmethod
+    def _reduce_state_chg(orig_state, indices, size_pos):
+        new_size = list(orig_state.size())
+        new_size[size_pos] = len(indices)
+        state = torch.FloatTensor(*new_size)
+        for row, orig_row in zip(state, orig_state):
+            for i, target_i in enumerate(indices):
+                row[i] = orig_row[target_i]
+        return state
 
-            # score actually changed:
-            if self._best_score != decided_score:
-                self._best_score = decided_score
-                self._best_params = local_params
-                self._best_state_dict = local_state_dict
+    @staticmethod
+    def _update_state(orig_state, indices, layer_names):
+        opt_layer, chg_layer = layer_names
+        opt_weight_s = '{0}.weight'.format(opt_layer)
+        opt_bias_s = '{0}.bias'.format(opt_layer)
+        chg_weight_s = '{0}.weight'.format(chg_layer)
+        state = copy.deepcopy(orig_state)
+        state[opt_weight_s] = Optimizer._reduce_state_opt(
+            state[opt_weight_s],
+            indices,
+            0
+        )
+        state[opt_bias_s] = Optimizer._reduce_state_opt(
+            state[opt_bias_s],
+            indices,
+            0
+        )
+        state[chg_weight_s] = Optimizer._reduce_state_chg(
+            state[chg_weight_s],
+            indices,
+            1
+        )
+        return state
 
-        if self._best_params is None or self._best_state_dict is None:
-            print('Could not optimized with gived data')
-            return self._baseline_params, model_state_dict
 
-        return self._best_params, self._best_state_dict
+    # def optimize(self, model_state_dict, layers_to_optimize, layers_to_adjust):
+    #     for layer_to_opt, layer_to_adjust in zip(layers_to_optimize, layers_to_adjust):
+    #         local_state_dict = copy.deepcopy(model_optim_state_dict)
+    #         local_params = list(range(0, len(local_state_dict['{0}.weights'.format(layer_to_opt)])))
+    #         test_score = self._run_test(local_state_dict, local_params)
+    #         decided_score = self._decision_function(
+    #             self._best_score,
+    #             test_score
+    #         )
+
+    #         # score actually changed:
+    #         if self._best_score != decided_score:
+    #             self._best_score = decided_score
+    #             self._best_params = local_params
+    #             self._best_state_dict = local_state_dict
+
+    #     if self._best_params is None or self._best_state_dict is None:
+    #         print('Could not optimized with gived data')
+    #         return self._baseline_params, model_state_dict
+
+    #     return self._best_params, self._best_state_dict
+
+    def optimize(self, model_state_dict, optimization_input):
+        for (opt_layer, chg_layer, p_index) in optimization_input:
+            opt_weight_s = '{0}.weight'.format(opt_layer)
+            opt_bias_s = '{0}.bias'.format(opt_layer)
+            chg_weight_s = '{0}.weight'.format(chg_layer)
+            local_state = model_state_dict
+            indices = list(range(0, len(local_state[opt_weight_s])))
+
+            # 1: calculate metrics per index
+            metric_per_param = []
+            for index in indices:
+                # changing state:
+                # state = copy.deepcopy(local_state)
+                # opt_weight = np.array(state[opt_weight_s][index:index+1])
+                # opt_bias = np.array(state[opt_bias_s][index:index+1])
+                # chg_weight = np.array(state[chg_weight_s])
+                # chg_weight = np.array([row[index:index+1] for row in chg_weight])
+
+                # state[opt_weight_s] = torch.from_numpy(opt_weight)
+                # state[opt_bias_s] = torch.from_numpy(opt_bias)
+                # state[chg_weight_s] = torch.from_numpy(chg_weight)
+                state = Optimizer._update_state(
+                    local_state,
+                    [index],
+                    (opt_layer, chg_layer)
+                )
+
+                params = list(self._baseline_params)
+                params[p_index] = 1
+                acc, flops = self._run_test(state, params)
+                metric_per_param.append((index, acc, flops))
+
+            # 2: sort metrics
+            metric_per_param = list(reversed(sorted(metric_per_param, key=lambda e: e[1])))
+
+            # 3: reduction
+            last_viable_params = self._baseline_params
+            last_viable_state = local_state
+            for limit in reversed(indices[1:len(indices)-1]):
+                sln_indices = [v[0] for v in metric_per_param[:limit]]
+                state = Optimizer._update_state(
+                    local_state,
+                    sln_indices,
+                    (opt_layer, chg_layer)
+                )
+                params = list(self._baseline_params)
+                params[p_index] = len(sln_indices)
+                acc, flops = self._run_test(state, params)
+                if (self._baseline_acc - acc) > self._epsilon:
+                    break
+                last_viable_params = params
+                last_viable_state = state
+
+            # 4: decision
+            return last_viable_params, last_viable_state
 
 
 def main_optimize():
+    print('-' * 100)
     print('Loaded from: {0}'.format(model_file_path))
+    print('-' * 100)
     data = mm.load_model(model_file_path)
     params = (10, 20, 50, 10)
     model = Network(*params)
     model.load_state_dict(data)
-    baseline = test(model, printing=False)
+    model = add_flops_counting_methods(model)
+    model.start_flops_count()
+    print('BASELINE')
+    baseline = test(model)
+    print(model)
+    print('FLOPS:', model.compute_average_flops_cost())
 
     model_optimizer = Optimizer(Network, baseline, params)
-    opt_params, opt_data = model_optimizer.optimize(data, ['conv1'], ['conv2'])
+    opt_params, opt_data = model_optimizer.optimize(data, [('conv1', 'conv2', 0)])
+    print('-'*100)
+    print('OPTIMIZATION')
+    print('Got params:', opt_params)
 
     optimized_model = Network(*opt_params)
     optimized_model.load_state_dict(opt_data)
     optimized_model = add_flops_counting_methods(optimized_model)
     optimized_model.start_flops_count()
-    print('-'*100)
-    print('Found reduced model')
+    # print('Found reduced model')
     # print('Params:', opt_params)
     test(optimized_model)
     print(optimized_model)
