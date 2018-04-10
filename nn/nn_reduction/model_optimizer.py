@@ -1,14 +1,21 @@
 import math
 import copy
 import numpy as np
+import itertools
 import torch
+
 from utils.flops_benchmark import add_flops_counting_methods
+from model_decisioner import Decisioner
 
 
 def init_optimizer_globals(train_func, test_func):
     global train, test
     train = train_func
     test = test_func
+
+
+def _find_subsets(S, subset_size):
+    return set(itertools.combinations(S, subset_size))
 
 
 class Optimizer:
@@ -98,6 +105,18 @@ class Optimizer:
         )
         return state
 
+    @staticmethod
+    def _create_state_params(orig_state, orig_indices_size, indices, layer_names, model_params, p_index):
+        state = Optimizer._update_state(
+            orig_state,
+            orig_indices_size,
+            indices,
+            layer_names
+        )
+        params = list(model_params)
+        params[p_index] = len(indices)
+        return state, params
+
     def _optimize_impl0(self, optimization_state, optimization_params, opt_layer, chg_layer, param_index):
         opt_weight_s, opt_bias_s, chg_weight_s = Optimizer._get_names(opt_layer, chg_layer)
         indices = list(range(0, *optimization_state[opt_bias_s].size()))
@@ -105,15 +124,23 @@ class Optimizer:
         # 1: calculate metrics per index
         metric_per_param = []
         for index in indices:
-            state = Optimizer._update_state(
-                optimization_state,
-                len(indices),
-                [index],
-                (opt_layer, chg_layer)
-            )
+            # state = Optimizer._update_state(
+            #     optimization_state,
+            #     len(indices),
+            #     [index],
+            #     (opt_layer, chg_layer)
+            # )
 
-            params = list(optimization_params)
-            params[param_index] = 1
+            # params = list(optimization_params)
+            # params[param_index] = 1
+            state, params = Optimizer._create_state_params(
+                optimization_state, 
+                len(indices), 
+                [index],
+                (opt_layer, chg_layer),
+                optimization_params,
+                param_index
+            )
             acc, flops = self._run_test(state, params)
             metric_per_param.append((index, acc, flops))
 
@@ -125,14 +152,25 @@ class Optimizer:
         last_viable_state = optimization_state
         for limit in reversed(indices[1:len(indices)]):
             sln_indices = [v[0] for v in metric_per_param[:limit]]
-            state = Optimizer._update_state(
-                optimization_state,
-                len(indices),
+
+            # state = Optimizer._update_state(
+            #     optimization_state,
+            #     len(indices),
+            #     sln_indices,
+            #     (opt_layer, chg_layer)
+            # )
+            # params = list(optimization_params)
+            # params[param_index] = len(sln_indices)
+
+            state, params = Optimizer._create_state_params(
+                optimization_state, 
+                len(indices), 
                 sln_indices,
-                (opt_layer, chg_layer)
+                (opt_layer, chg_layer),
+                optimization_params,
+                param_index
             )
-            params = list(optimization_params)
-            params[param_index] = len(sln_indices)
+
             acc, flops = self._run_test(state, params)
             if (self._baseline_acc - acc) > self._epsilon:
                 break
@@ -141,7 +179,53 @@ class Optimizer:
         return last_viable_state, last_viable_params
 
     def _optimize_impl1(self, optimization_state, optimization_params, opt_layer, chg_layer, param_index):
-        return optimization_state, optimization_params
+        """
+        Optimization algo 2: greedy
+
+        Until a viable solution found, try to reduce weights as much as possible
+        Once found, return it -> this is the best possible
+        A solution is a pair (acc, flops) which is the best one found during iteration with K elements reduction
+            Best pair is found by decision_function
+        A viable solution is the one that gives baseline_acc - sln_acc <= epsilon
+        """
+
+        opt_weight_s, opt_bias_s, chg_weight_s = Optimizer._get_names(opt_layer, chg_layer)
+        indices = list(range(0, *optimization_state[opt_bias_s].size()))
+
+        viable_state, viable_params = optimization_state, optimization_params
+        # found_viable_sln = False
+        for subset_size in reversed(range(1, len(indices))):
+            # if found_viable_sln:
+            #     break
+
+            all_index_subsets = list(_find_subsets(indices, subset_size))
+            potential_solutions = []
+            for i, sln_indices in enumerate(all_index_subsets):
+                state, params = Optimizer._create_state_params(
+                    optimization_state, 
+                    len(indices), 
+                    sln_indices,
+                    (opt_layer, chg_layer),
+                    optimization_params,
+                    param_index
+                )
+                potential_solutions.append((i, state, params))
+
+            decisioner = Decisioner(self._init_callable, potential_solutions)
+            best_id, best_acc, _ = decisioner.best_solution()
+            if (self._baseline_acc - best_acc) <= self._epsilon:
+                # found_viable_sln = True
+                viable_state, viable_params = Optimizer._create_state_params(
+                    optimization_state, 
+                    len(indices), 
+                    all_index_subsets[best_id],
+                    (opt_layer, chg_layer),
+                    optimization_params,
+                    param_index
+                )
+                break
+
+        return viable_state, viable_params
 
     def optimize(self, model_state_dict, optimization_input):
         optimization_params = self._baseline_params

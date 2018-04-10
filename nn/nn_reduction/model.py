@@ -10,6 +10,7 @@ from utils.flops_benchmark import add_flops_counting_methods
 
 import model_manager as mm
 from model_optimizer import Optimizer, init_optimizer_globals
+from model_decisioner import init_decisioner_globals
 
 
 # Training settings
@@ -198,18 +199,21 @@ def main_optimize():
     optimized_model.load_state_dict(opt_data)
     optimized_model = add_flops_counting_methods(optimized_model)
     optimized_model.start_flops_count()
-    # print('Found reduced model')
-    # print('Params:', opt_params)
     test(optimized_model)
     print(optimized_model)
     print('FLOPS:', optimized_model.compute_average_flops_cost())
+    optimized_model_file_path = 'optim_{0}'.format(model_file_path)
+    print('-'*100)
+    print('Saved to:', optimized_model_file_path)
+    mm.save_model(optimized_model, optimized_model_file_path)
 
 
 if __name__ == "__main__":
-    init_optimizer_globals(train, test)
     if args.create_model:
         main_train()
     if args.load_model:
         main_load()
     if args.opt_model:
+        init_optimizer_globals(train, test)
+        init_decisioner_globals(train, test)
         main_optimize()
