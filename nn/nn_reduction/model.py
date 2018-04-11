@@ -190,7 +190,7 @@ def main_optimize():
     print('FLOPS:', model.compute_average_flops_cost())
 
     model_optimizer = Optimizer(Network, baseline, params, args.opt_func)
-    opt_params, opt_data = model_optimizer.optimize(data, [('conv1', 'conv2', 0), ('conv2', 'fc1', 1)])
+    opt_params, opt_data = model_optimizer.optimize(data, [('conv1', 'conv2', 0)])#, ('conv2', 'fc1', 1)])
     print('-'*100)
     print('OPTIMIZATION')
     print('Got params:', opt_params)

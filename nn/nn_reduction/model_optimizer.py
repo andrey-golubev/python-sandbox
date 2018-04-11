@@ -49,10 +49,8 @@ class Optimizer:
             return score1
 
     def _run_test(self, state, model_params):
-        # print(model_params)
         model = self._init_callable(*model_params)
         model.load_state_dict(state)
-        # print('After load')
         model = add_flops_counting_methods(model)
         model.start_flops_count()
         return test(model, printing=False), model.compute_average_flops_cost()
@@ -118,21 +116,12 @@ class Optimizer:
         return state, params
 
     def _optimize_impl0(self, optimization_state, optimization_params, opt_layer, chg_layer, param_index):
-        opt_weight_s, opt_bias_s, chg_weight_s = Optimizer._get_names(opt_layer, chg_layer)
+        _, opt_bias_s, _ = Optimizer._get_names(opt_layer, chg_layer)
         indices = list(range(0, *optimization_state[opt_bias_s].size()))
 
         # 1: calculate metrics per index
         metric_per_param = []
         for index in indices:
-            # state = Optimizer._update_state(
-            #     optimization_state,
-            #     len(indices),
-            #     [index],
-            #     (opt_layer, chg_layer)
-            # )
-
-            # params = list(optimization_params)
-            # params[param_index] = 1
             state, params = Optimizer._create_state_params(
                 optimization_state, 
                 len(indices), 
@@ -152,16 +141,6 @@ class Optimizer:
         last_viable_state = optimization_state
         for limit in reversed(indices[1:len(indices)]):
             sln_indices = [v[0] for v in metric_per_param[:limit]]
-
-            # state = Optimizer._update_state(
-            #     optimization_state,
-            #     len(indices),
-            #     sln_indices,
-            #     (opt_layer, chg_layer)
-            # )
-            # params = list(optimization_params)
-            # params[param_index] = len(sln_indices)
-
             state, params = Optimizer._create_state_params(
                 optimization_state, 
                 len(indices), 
@@ -188,13 +167,13 @@ class Optimizer:
             Best pair is found by decision_function
         A viable solution is the one that gives baseline_acc - sln_acc <= epsilon
         """
-
-        opt_weight_s, opt_bias_s, chg_weight_s = Optimizer._get_names(opt_layer, chg_layer)
+        _, opt_bias_s, _ = Optimizer._get_names(opt_layer, chg_layer)
         indices = list(range(0, *optimization_state[opt_bias_s].size()))
 
         viable_state, viable_params = optimization_state, optimization_params
         # found_viable_sln = False
-        for subset_size in reversed(range(1, len(indices))):
+        for subset_size in range(1, len(indices)):
+            # print('Reduction size:', subset_size)
             # if found_viable_sln:
             #     break
 
