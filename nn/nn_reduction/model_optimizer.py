@@ -2,6 +2,7 @@ import math
 import copy
 import numpy as np
 import itertools
+import random
 import torch
 
 from utils.flops_benchmark import add_flops_counting_methods
@@ -19,7 +20,7 @@ def _find_subsets(S, subset_size):
 
 
 class Optimizer:
-    def __init__(self, model_initializer, baseline_acc, params, optimization_index, epsilon=0.07):
+    def __init__(self, model_initializer, baseline_acc, params, method_index, epsilon=0.07):
         self._init_callable = model_initializer
         self._baseline_acc = baseline_acc
         self._baseline_params = params
@@ -29,9 +30,10 @@ class Optimizer:
         self._epsilon = epsilon
         self._optimization_func_aliases = {
             0: self._optimize_impl0,
-            1: self._optimize_impl1
+            1: self._optimize_impl1,
+            2: self._optimize_impl2
         }
-        self._optimize_impl = self._optimization_func_aliases[optimization_index]
+        self._optimize_impl = self._optimization_func_aliases[method_index]
 
     def _decision_function(self, score1, score2):
         b_acc, _ = self._baseline_acc
@@ -115,6 +117,34 @@ class Optimizer:
         params[p_index] = len(indices)
         return state, params
 
+    def _fine_tune(self, model_state, model_params, epochs):
+        model = self._init_callable(*model_params)
+        model.load_state_dict(model_state)
+        model_optimizer = train_optimizer(model.parameters(), **optimizer_params)
+        for _ in range(epochs):
+            train(model, model_optimizer)
+        return model.state_dict(), model_params
+
+    def optimize(self, model_state_dict, optimization_input):
+        optimization_params = self._baseline_params
+        optimization_state = model_state_dict
+        for opt_in in optimization_input:
+            # print('Optimization Step:', opt_in)
+
+            # run reduction algorithm
+            optimization_state, optimization_params = self._optimize_impl(
+                optimization_state,
+                optimization_params,
+                *opt_in)
+
+            # fine-tune after reduction
+            optimization_state, optimization_params = self._fine_tune(
+                optimization_state,
+                optimization_params,
+                fine_tune_epochs)
+
+        return optimization_params, optimization_state
+
     def _optimize_impl0(self, optimization_state, optimization_params, opt_layer, chg_layer, param_index):
         """
         Optimization algo 1: heuristic
@@ -164,8 +194,8 @@ class Optimizer:
         """
         Optimization algo 2: greedy
 
-        Until a viable solution found, try to reduce weights as much as possible
-        Once found, return it -> this is the best possible
+        Until a viable solution found, try to increase depth as much as possible
+        Once found, return that solution -> this is the best possible
         A solution is a pair (acc, flops) which is the best one found during iteration with K elements reduction
             Best pair is found by decision_function
         A viable solution is the one that gives baseline_acc - sln_acc <= epsilon
@@ -208,30 +238,57 @@ class Optimizer:
 
         return viable_state, viable_params
 
-    def _fine_tune(self, model_state, model_params, epochs):
-        model = self._init_callable(*model_params)
-        model.load_state_dict(model_state)
-        model_optimizer = train_optimizer(model.parameters(), **optimizer_params)
-        for _ in range(epochs):
-            train(model, model_optimizer)
-        return model.state_dict(), model_params
+    def _optimize_impl2(self, optimization_state, optimization_params, opt_layer, chg_layer, param_index):
+        """
+        Optimization algo 3: greedy 2
 
-    def optimize(self, model_state_dict, optimization_input):
-        optimization_params = self._baseline_params
-        optimization_state = model_state_dict
-        for opt_in in optimization_input:
-            # print('Optimization Step:', opt_in)
+        While a viable solution exists, try to decrease the depth as much as possible
+        Once there's a non-viable solution, return the last viable -> this is the best possible
+        A solution is a pair (acc, flops) which is the best one found during iteration with K elements reduction
+            Best pair is found by decision_function
+        A viable solution is the one that gives baseline_acc - sln_acc <= epsilon
+        Additionally, iteration's limit is presented
+        """
+        max_iterations = 50
+        _, opt_bias_s, _ = Optimizer._get_names(opt_layer, chg_layer)
+        indices = list(range(0, *optimization_state[opt_bias_s].size()))
 
-            # run reduction algorithm
-            optimization_state, optimization_params = self._optimize_impl(
+        viable_state, viable_params = optimization_state, optimization_params
+        # found_nonviable_sln = False
+        for subset_size in list(reversed(range(1, len(indices)))):
+            # if found_nonviable_sln:
+                # break
+
+            all_index_subsets = list(_find_subsets(indices, subset_size))
+            potential_solutions = []
+            for i, sln_indices in enumerate(all_index_subsets):
+                state, params = Optimizer._create_state_params(
+                    optimization_state,
+                    len(indices),
+                    sln_indices,
+                    (opt_layer, chg_layer),
+                    optimization_params,
+                    param_index
+                )
+                potential_solutions.append((i, state, params))
+
+            if len(potential_solutions) > max_iterations:
+                potential_solutions = random.sample(potential_solutions, max_iterations)
+
+            decisioner = Decisioner(self._init_callable, potential_solutions)
+            best_id, best_acc, _ = decisioner.best_solution()
+            if (self._baseline_acc - best_acc) > self._epsilon:
+                # found_nonviable_sln = True
+                break
+
+            viable_state, viable_params = Optimizer._create_state_params(
                 optimization_state,
+                len(indices),
+                all_index_subsets[best_id],
+                (opt_layer, chg_layer),
                 optimization_params,
-                *opt_in)
+                param_index
+            )
 
-            # fine-tune after reduction
-            optimization_state, optimization_params = self._fine_tune(
-                optimization_state,
-                optimization_params,
-                fine_tune_epochs)
+        return viable_state, viable_params
 
-        return optimization_params, optimization_state
