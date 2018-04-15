@@ -8,9 +8,9 @@ from utils.flops_benchmark import add_flops_counting_methods
 from model_decisioner import Decisioner
 
 
-def init_optimizer_globals(train_func, test_func):
-    global train, test
-    train = train_func
+def init_optimizer_globals(train_data, test_func):
+    global train, train_optimizer, optimizer_params, fine_tune_epochs, test
+    train, train_optimizer, optimizer_params, fine_tune_epochs = train_data
     test = test_func
 
 
@@ -19,19 +19,19 @@ def _find_subsets(S, subset_size):
 
 
 class Optimizer:
-    def __init__(self, model_initializer, baseline_acc, params, optimization_alias):
+    def __init__(self, model_initializer, baseline_acc, params, optimization_index, epsilon=0.07):
         self._init_callable = model_initializer
         self._baseline_acc = baseline_acc
         self._baseline_params = params
         self._best_score = (0.0, math.inf)
         self._best_params = None
         self._best_state_dict = None
-        self._epsilon = 0.07
+        self._epsilon = epsilon
         self._optimization_func_aliases = {
             0: self._optimize_impl0,
             1: self._optimize_impl1
         }
-        self._optimize_impl = self._optimization_func_aliases[optimization_alias]
+        self._optimize_impl = self._optimization_func_aliases[optimization_index]
 
     def _decision_function(self, score1, score2):
         b_acc, _ = self._baseline_acc
@@ -116,6 +116,9 @@ class Optimizer:
         return state, params
 
     def _optimize_impl0(self, optimization_state, optimization_params, opt_layer, chg_layer, param_index):
+        """
+        Optimization algo 1: heuristic
+        """
         _, opt_bias_s, _ = Optimizer._get_names(opt_layer, chg_layer)
         indices = list(range(0, *optimization_state[opt_bias_s].size()))
 
@@ -173,7 +176,6 @@ class Optimizer:
         viable_state, viable_params = optimization_state, optimization_params
         # found_viable_sln = False
         for subset_size in range(1, len(indices)):
-            # print('Reduction size:', subset_size)
             # if found_viable_sln:
             #     break
 
@@ -206,13 +208,30 @@ class Optimizer:
 
         return viable_state, viable_params
 
+    def _fine_tune(self, model_state, model_params, epochs):
+        model = self._init_callable(*model_params)
+        model.load_state_dict(model_state)
+        model_optimizer = train_optimizer(model.parameters(), **optimizer_params)
+        for _ in range(epochs):
+            train(model, model_optimizer)
+        return model.state_dict(), model_params
+
     def optimize(self, model_state_dict, optimization_input):
         optimization_params = self._baseline_params
         optimization_state = model_state_dict
         for opt_in in optimization_input:
+            # print('Optimization Step:', opt_in)
+
+            # run reduction algorithm
             optimization_state, optimization_params = self._optimize_impl(
                 optimization_state,
                 optimization_params,
                 *opt_in)
+
+            # fine-tune after reduction
+            optimization_state, optimization_params = self._fine_tune(
+                optimization_state,
+                optimization_params,
+                fine_tune_epochs)
 
         return optimization_params, optimization_state

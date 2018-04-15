@@ -44,6 +44,8 @@ parser.add_argument('--opt-func',
                     type=int,
                     choices=[0, 1],
                     help='Different optimization functions')
+parser.add_argument('--epsilon', type=float, default=0.07,
+                    help='Epsilon between baseline accuracy and reduction algo accuracy')
 
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -94,7 +96,7 @@ class Network(nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-def train(model, optimizer, epoch):
+def train(model, optimizer, epoch=0):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
         if args.cuda:
@@ -135,7 +137,8 @@ def test(model, printing=True):
 model_file_path = args.file  # 'mnist_0.pth'
 
 
-def make_model():
+########################################################################################################################
+def main_train():
     model = Network(10, 20, 50, 10)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     model = add_flops_counting_methods(model)
@@ -156,15 +159,11 @@ def make_model():
     print('Saved to: {0}'.format(model_file_path))
 
 
-########################################################################################################################
-def main_train():
-    make_model()
-
-
 def main_load():
     print('Loaded from: {0}'.format(model_file_path))
     data = mm.load_model(model_file_path)
-    model = Network(10, 20, 50, 10)
+    model_params = [v.size()[0] for k, v in data.items() if 'bias' in k]
+    model = Network(*model_params)
     model.load_state_dict(data)
     model = add_flops_counting_methods(model)
     model.start_flops_count()
@@ -189,8 +188,11 @@ def main_optimize():
     print(model)
     print('FLOPS:', model.compute_average_flops_cost())
 
-    model_optimizer = Optimizer(Network, baseline, params, args.opt_func)
-    opt_params, opt_data = model_optimizer.optimize(data, [('conv1', 'conv2', 0)])#, ('conv2', 'fc1', 1)])
+    model_optimizer = Optimizer(Network, baseline, params, args.opt_func, args.epsilon)
+    opt_params, opt_data = model_optimizer.optimize(data, [
+        ('conv1', 'conv2', 0),
+        ('conv2', 'fc1', 1)
+    ])
     print('-'*100)
     print('OPTIMIZATION')
     print('Got params:', opt_params)
@@ -214,6 +216,14 @@ if __name__ == "__main__":
     if args.load_model:
         main_load()
     if args.opt_model:
-        init_optimizer_globals(train, test)
+        # optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+        init_optimizer_globals(
+            (
+                train,
+                optim.SGD,
+                {'lr': args.lr, 'momentum': args.momentum},
+                int(args.epochs / 10)
+            ),
+            test)
         init_decisioner_globals(train, test)
         main_optimize()
