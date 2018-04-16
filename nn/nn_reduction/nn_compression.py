@@ -1,13 +1,12 @@
 from __future__ import print_function
 import argparse
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torchvision import datasets, transforms
 from torch.autograd import Variable
 from utils.flops_benchmark import add_flops_counting_methods
 
+import model_data
 import model_manager as mm
 from model_optimizer import Optimizer, init_optimizer_globals
 from model_decisioner import init_decisioner_globals
@@ -47,53 +46,18 @@ parser.add_argument('--opt-func',
 parser.add_argument('--epsilon', type=float, default=0.07,
                     help='Epsilon between baseline accuracy and reduction algo accuracy')
 
+parser.add_argument('--dataset', type=str, default='mnist',
+                    help='Dataset')
+
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
-
 torch.manual_seed(args.seed)
-if args.cuda:
-    torch.cuda.manual_seed(args.seed)
 
 
-kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
-train_loader = torch.utils.data.DataLoader(
-    datasets.MNIST('../data', train=True, download=True,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),
-                       transforms.Normalize((0.1307,), (0.3081,))
-                   ])),
-    batch_size=args.batch_size, shuffle=True, **kwargs)
-test_loader = torch.utils.data.DataLoader(
-    datasets.MNIST('../data', train=False, transform=transforms.Compose([
-                       transforms.ToTensor(),
-                       transforms.Normalize((0.1307,), (0.3081,))
-                   ])),
-    batch_size=args.test_batch_size, shuffle=True, **kwargs)
-
-
-class Network(nn.Module):
-    def __init__(self, conv1_out_size, conv2_out_size, fc1_out, fc2_out):
-        self._out_sizes = {
-            'conv1': conv1_out_size,
-            'conv2': conv2_out_size,
-            'fc1': fc1_out,
-            'fc2': fc2_out
-        }
-        super(Network, self).__init__()
-        self.conv1 = nn.Conv2d(1, conv1_out_size, kernel_size=5)
-        self.conv2 = nn.Conv2d(conv1_out_size, conv2_out_size, kernel_size=5)
-        self.conv2_drop = nn.Dropout2d()
-        self.fc1 = nn.Linear(4*4*conv2_out_size, fc1_out)
-        self.fc2 = nn.Linear(fc1_out, fc2_out)
-
-    def forward(self, x):
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        x = x.view(-1, 4*4*self._out_sizes['conv2'])
-        x = F.relu(self.fc1(x))
-        x = F.dropout(x, training=self.training)
-        x = self.fc2(x)
-        return F.log_softmax(x, dim=1)
+train_loader = None
+test_loader = None
+network_init_callable = None
+network_init_params = None
 
 
 def train(model, optimizer, epoch=0):
@@ -139,7 +103,7 @@ model_file_path = args.file  # 'mnist_0.pth'
 
 ########################################################################################################################
 def main_train():
-    model = Network(10, 20, 50, 10)
+    model = network_init_callable(*network_init_params)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
     model = add_flops_counting_methods(model)
     if args.cuda:
@@ -163,7 +127,7 @@ def main_load():
     print('Loaded from: {0}'.format(model_file_path))
     data = mm.load_model(model_file_path)
     model_params = [v.size()[0] for k, v in data.items() if 'bias' in k]
-    model = Network(*model_params)
+    model = network_init_callable(*model_params)
     model.load_state_dict(data)
     model = add_flops_counting_methods(model)
     model.start_flops_count()
@@ -178,8 +142,8 @@ def main_optimize():
     print('Loaded from: {0}'.format(model_file_path))
     print('-' * 100)
     data = mm.load_model(model_file_path)
-    params = (10, 20, 50, 10)
-    model = Network(*params)
+    params = network_init_params
+    model = network_init_callable(*params)
     model.load_state_dict(data)
     model = add_flops_counting_methods(model)
     model.start_flops_count()
@@ -188,7 +152,7 @@ def main_optimize():
     print(model)
     print('FLOPS:', model.compute_average_flops_cost())
 
-    model_optimizer = Optimizer(Network, baseline, params, args.opt_func, args.epsilon)
+    model_optimizer = Optimizer(network_init_callable, baseline, params, args.opt_func, args.epsilon)
     opt_params, opt_data = model_optimizer.optimize(data, [
         ('conv1', 'conv2', 0),
         ('conv2', 'fc1', 1)
@@ -197,7 +161,7 @@ def main_optimize():
     print('OPTIMIZATION')
     print('Got params:', opt_params)
 
-    optimized_model = Network(*opt_params)
+    optimized_model = network_init_callable(*opt_params)
     optimized_model.load_state_dict(opt_data)
     optimized_model = add_flops_counting_methods(optimized_model)
     optimized_model.start_flops_count()
@@ -211,6 +175,12 @@ def main_optimize():
 
 
 if __name__ == "__main__":
+    model_data.init_model_data_globals(args)
+    data = model_data.get_data(args.dataset)
+    network_init_callable = data['init_callable']
+    network_init_params = data['init_params']
+    train_loader = data['train_loader']
+    test_loader = data['test_loader']
     if args.create_model:
         main_train()
     if args.load_model:
