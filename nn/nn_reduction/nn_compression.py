@@ -58,6 +58,7 @@ train_loader = None
 test_loader = None
 network_init_callable = None
 network_init_params = None
+optimization_data = None
 
 
 def train(model, optimizer, epoch=0):
@@ -153,10 +154,7 @@ def main_optimize():
     print('FLOPS:', model.compute_average_flops_cost())
 
     model_optimizer = Optimizer(network_init_callable, baseline, params, args.opt_func, args.epsilon)
-    opt_params, opt_data = model_optimizer.optimize(data, [
-        ('conv1', 'conv2', 0),
-        ('conv2', 'fc1', 1)
-    ])
+    opt_params, opt_data = model_optimizer.optimize(data, optimization_data)
     print('-'*100)
     print('OPTIMIZATION')
     print('Got params:', opt_params)
@@ -181,6 +179,7 @@ if __name__ == "__main__":
     network_init_params = data['init_params']
     train_loader = data['train_loader']
     test_loader = data['test_loader']
+    optimization_data = data['optimization_data']
     if args.create_model:
         main_train()
     if args.load_model:

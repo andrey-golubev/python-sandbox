@@ -63,6 +63,10 @@ def get_data(key):
             'init_params': (10, 20, 50, 10),
             'train_loader': MnistNetwork.train_loader(),
             'test_loader': MnistNetwork.test_loader(),
+            'optimization_data': [
+                ('conv1', 'conv2', 0),
+                ('conv2', 'fc1', 1)
+            ],
         }
     }
     return get_data.data[key]
