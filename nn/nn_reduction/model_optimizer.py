@@ -7,6 +7,7 @@ import torch
 
 from utils.flops_benchmark import add_flops_counting_methods
 from model_decisioner import Decisioner
+from model_qlearner import Agent, convert
 
 
 def init_optimizer_globals(train_data, test_func):
@@ -14,15 +15,29 @@ def init_optimizer_globals(train_data, test_func):
     train, train_optimizer, optimizer_params, fine_tune_epochs = train_data
     test = test_func
 
+    # Q-learning things:
+    global reward_coeff
+    reward_coeff = 0.5
+
+    global expected_compression_ratio
+    expected_compression_ratio = 0.5
+
+    global q_train_episodes
+    q_train_episodes = 100
+
+    global least_iter_num
+    least_iter_num = 10
+
 
 def _find_subsets(S, subset_size):
     return set(itertools.combinations(S, subset_size))
 
 
 class Optimizer:
-    def __init__(self, model_initializer, baseline_acc, params, method_index, epsilon=0.07):
+    def __init__(self, model_initializer, baseline_acc, baseline_flops, params, method_index, epsilon=0.07):
         self._init_callable = model_initializer
         self._baseline_acc = baseline_acc
+        self._baseline_flops = baseline_flops
         self._baseline_params = params
         self._best_score = (0.0, math.inf)
         self._best_params = None
@@ -35,21 +50,6 @@ class Optimizer:
             3: self._logging_optimization0
         }
         self._optimize_impl = self._optimization_func_aliases[method_index]
-
-    def _decision_function(self, score1, score2):
-        b_acc, _ = self._baseline_acc
-        (acc1, flops1), (acc2, flops2) = score1, score2
-        bad1, bad2 = False, False
-        if math.abs(acc1 - b_acc) > self._epsilon:
-            bad1 = True
-        if math.abs(acc2 - b_acc) > self._epsilon:
-            bad2 = True
-        if bad1 and bad2:
-            return self._best_score, self._best_params
-        if bad1 or flops2 < flops1:
-            return score2
-        if bad2 or flops1 < flops2:
-            return score1
 
     def _run_test(self, state, model_params):
         model = self._init_callable(*model_params)
@@ -127,31 +127,31 @@ class Optimizer:
         return model.state_dict(), model_params
 
     def optimize(self, model_state_dict, optimization_input):
-        optimization_params = self._baseline_params
-        optimization_state = model_state_dict
-        for opt_in in optimization_input:
-            # print('Optimization Step:', opt_in)
+        return self._q_learning_impl(model_state_dict, optimization_input)
+        # optimization_params = self._baseline_params
+        # optimization_state = model_state_dict
+        # for opt_in in optimization_input:
+        #     # print('Optimization Step:', opt_in)
 
-            # run reduction algorithm
-            optimization_state, optimization_params = self._optimize_impl(
-                optimization_state,
-                optimization_params,
-                *opt_in)
+        #     # run reduction algorithm
+        #     optimization_state, optimization_params = self._optimize_impl(
+        #         optimization_state,
+        #         optimization_params,
+        #         *opt_in)
 
-            # fine-tune after reduction
-            optimization_state, optimization_params = self._fine_tune(
-                optimization_state,
-                optimization_params,
-                fine_tune_epochs)
+        #     # fine-tune after reduction
+        #     optimization_state, optimization_params = self._fine_tune(
+        #         optimization_state,
+        #         optimization_params,
+        #         fine_tune_epochs)
 
-        return optimization_params, optimization_state
+        # return optimization_params, optimization_state
 
     def _optimize_impl0(self, optimization_state, optimization_params, opt_layer, chg_layer, param_index):
         """
         Optimization algo 1: heuristic
         """
-        _, opt_bias_s, _ = Optimizer._get_names(opt_layer, chg_layer)
-        indices = list(range(0, *optimization_state[opt_bias_s].size()))
+        indices = list(range(0, self._baseline_params[param_index]))
 
         # 1: calculate metrics per index
         metric_per_param = []
@@ -201,8 +201,7 @@ class Optimizer:
             Best pair is found by decision_function
         A viable solution is the one that gives baseline_acc - sln_acc <= epsilon
         """
-        _, opt_bias_s, _ = Optimizer._get_names(opt_layer, chg_layer)
-        indices = list(range(0, *optimization_state[opt_bias_s].size()))
+        indices = list(range(0, self._baseline_params[param_index]))
 
         viable_state, viable_params = optimization_state, optimization_params
         # found_viable_sln = False
@@ -251,8 +250,7 @@ class Optimizer:
         Additionally, iteration's limit is presented
         """
         max_iterations = 50
-        _, opt_bias_s, _ = Optimizer._get_names(opt_layer, chg_layer)
-        indices = list(range(0, *optimization_state[opt_bias_s].size()))
+        indices = list(range(0, self._baseline_params[param_index]))
 
         viable_state, viable_params = optimization_state, optimization_params
         # found_nonviable_sln = False
@@ -306,18 +304,14 @@ class Optimizer:
         """
         import csv
         max_iterations = 50
-        _, opt_bias_s, _ = Optimizer._get_names(opt_layer, chg_layer)
         viable_state, viable_params = optimization_state, optimization_params
-        indices = list(range(0, *optimization_state[opt_bias_s].size()))
+        indices = list(range(0, self._baseline_params[param_index]))
         with open('logs_{0}_1.csv'.format(opt_layer), 'w', newline='') as csvfile:
             writer = csv.writer(csvfile, delimiter=',')
             writer.writerow(['Size', 'Accuracy', 'FLOPS'])
 
             # found_nonviable_sln = False
             for subset_size in list(reversed(range(1, len(indices)))):
-                # if found_nonviable_sln:
-                    # break
-
                 all_index_subsets = list(_find_subsets(indices, subset_size))
                 potential_solutions = []
                 for i, sln_indices in enumerate(all_index_subsets):
@@ -335,22 +329,110 @@ class Optimizer:
                     potential_solutions = random.sample(potential_solutions, max_iterations)
 
                 decisioner = Decisioner(self._init_callable, potential_solutions)
-                # best_id, best_acc, _ = decisioner.best_solution()
-                # # if (self._baseline_acc - best_acc) > self._epsilon:
-                #     # found_nonviable_sln = True
-                #     # break
-
-                # viable_state, viable_params = Optimizer._create_state_params(
-                #     optimization_state,
-                #     len(indices),
-                #     all_index_subsets[best_id],
-                #     (opt_layer, chg_layer),
-                #     optimization_params,
-                #     param_index
-                # )
-
                 all_solutions = decisioner.all_solutions()
                 for _, accuracy, flops in all_solutions:
                     writer.writerow([subset_size, accuracy, flops])
 
         return viable_state, viable_params
+
+    def _change_env(self, model_state, model_params, optimization_input, new_env_state):
+        start = 0
+        for opt_layer, chg_layer, opt_index in optimization_input:
+            layer_size = self._baseline_params[opt_index]
+
+            # create weights to include
+            included_weights = [i for i, v in enumerate(new_env_state[start:start+layer_size]) if v == 1]
+            # update model params and state
+            model_state, model_params = Optimizer._create_state_params(
+                model_state,
+                layer_size,
+                included_weights,
+                (opt_layer, chg_layer),
+                model_params,
+                opt_index
+            )
+            start += layer_size
+        return model_state, model_params
+
+    def _q_learning_impl(self, model_state_dict, optimization_input):
+        state_size = 0  # environment state size
+
+        # preparation:
+        for _, _, opt_index in optimization_input:
+            state_size += self._baseline_params[opt_index]
+
+        agent = Agent(state_size)
+
+        for _ in range(q_train_episodes):  # recurrent loop to train the agent
+            env_state = np.array([1]*state_size)  # environment state: initial - all weights are enabled
+            done = False
+
+            local_state = model_state_dict
+            local_params = self._baseline_params
+
+            iteration = 0
+            while not done or iteration < least_iter_num:  # optimization loop
+                # perform action
+                indices = agent.act(env_state)
+
+                # see the state transition and reward:
+                # 1. create new state -- apply action
+                next_state = env_state
+                for i, flag in enumerate(indices):
+                    if flag > 0:  # any positive number - switch feature map
+                        next_state[i] = convert(env_state[i])
+
+                # 2. collect statistics -- see consequences
+                local_state, local_params = self._change_env(
+                    local_state,
+                    local_params,
+                    optimization_input,
+                    next_state
+                )
+                acc, flops = self._run_test(local_state, local_params)
+
+                # 3. calculate reward -- measure consequences
+                flops_ratio = (self._baseline_flops - flops) / self._baseline_flops
+                reward_part = reward_coeff * flops_ratio
+                punishment_part = (1.0 - reward_coeff) * (acc - self._baseline_acc)
+                reward = reward_part + punishment_part
+
+                # 4. change status
+                if (self._baseline_acc - acc) > self._epsilon or flops_ratio >= expected_compression_ratio:
+                    done = True
+
+                # remember occasion
+                agent.remember(env_state, indices, reward, next_state, done)
+
+                # update environment
+                env_state = next_state
+
+                iteration += 1
+                # exit if finished
+                if done:
+                    break
+
+            # train the agent
+            agent.replay(27)
+
+        # make decision
+        env_state = np.array([1]*state_size)
+        indices = agent.act(env_state)
+        for i, flag in enumerate(indices):
+            if flag > 0:  # any positive number - switch feature map
+                env_state[i] = convert(env_state[i])
+
+        # update optim_state, optim_params
+        optimization_state, optimization_params = self._change_env(
+            model_state_dict,
+            self._baseline_params,
+            optimization_input,
+            env_state
+        )
+        optimization_state, optimization_params = self._fine_tune(
+            optimization_state,
+            optimization_params,
+            fine_tune_epochs
+        )
+
+        return optimization_params, optimization_state

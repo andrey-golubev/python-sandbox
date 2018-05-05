@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 from __future__ import print_function
 import argparse
 import torch
@@ -151,9 +153,17 @@ def main_optimize():
     print('BASELINE')
     baseline = test(model)
     print(model)
-    print('FLOPS:', model.compute_average_flops_cost())
+    baseline_flops = model.compute_average_flops_cost()
+    print('FLOPS:', baseline_flops)
 
-    model_optimizer = Optimizer(network_init_callable, baseline, params, args.opt_func, args.epsilon)
+    model_optimizer = Optimizer(
+        network_init_callable,
+        baseline,
+        baseline_flops,
+        params,
+        args.opt_func,
+        args.epsilon
+    )
     opt_params, opt_data = model_optimizer.optimize(data, optimization_data)
     print('-'*100)
     print('OPTIMIZATION')
