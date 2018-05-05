@@ -1,0 +1,27 @@
+----------------------------------------------------------------------------------------------------
+Loaded from: mnist_0.pth
+----------------------------------------------------------------------------------------------------
+BASELINE
+Test set: Average loss: 0.0503, Accuracy: 9856/10000 (99%)
+MnistNetwork(
+  (conv1): Conv2d(1, 10, kernel_size=(5, 5), stride=(1, 1))
+  (conv2): Conv2d(10, 20, kernel_size=(5, 5), stride=(1, 1))
+  (conv2_drop): Dropout2d(p=0.5)
+  (fc1): Linear(in_features=320, out_features=50, bias=True)
+  (fc2): Linear(in_features=50, out_features=10, bias=True)
+)
+FLOPS: 935040.0
+----------------------------------------------------------------------------------------------------
+OPTIMIZATION
+Got params: [8, 20, 50, 10]
+Test set: Average loss: 0.0506, Accuracy: 9851/10000 (99%)
+MnistNetwork(
+  (conv1): Conv2d(1, 8, kernel_size=(5, 5), stride=(1, 1))
+  (conv2): Conv2d(8, 20, kernel_size=(5, 5), stride=(1, 1))
+  (conv2_drop): Dropout2d(p=0.5)
+  (fc1): Linear(in_features=320, out_features=50, bias=True)
+  (fc2): Linear(in_features=50, out_features=10, bias=True)
+)
+FLOPS: 748288.0
+----------------------------------------------------------------------------------------------------
+Saved to: optim_mnist_0.pth

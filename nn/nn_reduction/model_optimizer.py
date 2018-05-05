@@ -17,7 +17,7 @@ def init_optimizer_globals(train_data, test_func):
 
     # Q-learning things:
     global reward_coeff
-    reward_coeff = 0.5
+    reward_coeff = 0.1
 
     global expected_compression_ratio
     expected_compression_ratio = 0.5
@@ -47,8 +47,12 @@ class Optimizer:
             0: self._optimize_impl0,
             1: self._optimize_impl1,
             2: self._optimize_impl2,
-            3: self._logging_optimization0
+            3: self._logging_optimization0,
+            4: self._q_learning_impl
         }
+        self._q_learning = False
+        if method_index == 4:
+            self._q_learning = True
         self._optimize_impl = self._optimization_func_aliases[method_index]
 
     def _run_test(self, state, model_params):
@@ -127,25 +131,28 @@ class Optimizer:
         return model.state_dict(), model_params
 
     def optimize(self, model_state_dict, optimization_input):
-        return self._q_learning_impl(model_state_dict, optimization_input)
-        # optimization_params = self._baseline_params
-        # optimization_state = model_state_dict
-        # for opt_in in optimization_input:
-        #     # print('Optimization Step:', opt_in)
+        if self._q_learning:
+            return self._q_learning_impl(model_state_dict, optimization_input)
 
-        #     # run reduction algorithm
-        #     optimization_state, optimization_params = self._optimize_impl(
-        #         optimization_state,
-        #         optimization_params,
-        #         *opt_in)
+        # greedy methods:
+        optimization_params = self._baseline_params
+        optimization_state = model_state_dict
+        for opt_in in optimization_input:
+            # print('Optimization Step:', opt_in)
 
-        #     # fine-tune after reduction
-        #     optimization_state, optimization_params = self._fine_tune(
-        #         optimization_state,
-        #         optimization_params,
-        #         fine_tune_epochs)
+            # run reduction algorithm
+            optimization_state, optimization_params = self._optimize_impl(
+                optimization_state,
+                optimization_params,
+                *opt_in)
 
-        # return optimization_params, optimization_state
+        # fine-tune after reduction
+        optimization_state, optimization_params = self._fine_tune(
+            optimization_state,
+            optimization_params,
+            fine_tune_epochs)
+
+        return optimization_params, optimization_state
 
     def _optimize_impl0(self, optimization_state, optimization_params, opt_layer, chg_layer, param_index):
         """
@@ -342,6 +349,12 @@ class Optimizer:
 
             # create weights to include
             included_weights = [i for i, v in enumerate(new_env_state[start:start+layer_size]) if v == 1]
+
+            if len(included_weights) == 0:
+                rnd_index = np.random.randint(start, start+layer_size)
+                included_weights = [rnd_index]
+                new_env_state[rnd_index] = convert(new_env_state[rnd_index])
+
             # update model params and state
             model_state, model_params = Optimizer._create_state_params(
                 model_state,
@@ -352,7 +365,7 @@ class Optimizer:
                 opt_index
             )
             start += layer_size
-        return model_state, model_params
+        return model_state, model_params, new_env_state
 
     def _q_learning_impl(self, model_state_dict, optimization_input):
         state_size = 0  # environment state size
@@ -382,7 +395,7 @@ class Optimizer:
                         next_state[i] = convert(env_state[i])
 
                 # 2. collect statistics -- see consequences
-                local_state, local_params = self._change_env(
+                local_state, local_params, next_state = self._change_env(
                     local_state,
                     local_params,
                     optimization_input,
@@ -422,7 +435,7 @@ class Optimizer:
                 env_state[i] = convert(env_state[i])
 
         # update optim_state, optim_params
-        optimization_state, optimization_params = self._change_env(
+        optimization_state, optimization_params, _ = self._change_env(
             model_state_dict,
             self._baseline_params,
             optimization_input,

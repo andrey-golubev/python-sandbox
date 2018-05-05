@@ -65,7 +65,7 @@ def get_data(key):
             'test_loader': MnistNetwork.test_loader(),
             'optimization_data': [
                 ('conv1', 'conv2', 0),
-                ('conv2', 'fc1', 1)
+                # ('conv2', 'fc1', 1)
             ],
         }
     }

@@ -43,7 +43,7 @@ parser.add_argument('--opt-func',
                     nargs='?',
                     default=0, const=0,
                     type=int,
-                    choices=[0, 1, 2, 3],
+                    choices=[0, 1, 2, 3, 4],
                     help='Different optimization functions')
 parser.add_argument('--epsilon', type=float, default=0.07,
                     help='Epsilon between baseline accuracy and reduction algo accuracy')
