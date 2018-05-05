@@ -363,15 +363,14 @@ class Optimizer:
 
         agent = Agent(state_size)
 
-        for _ in range(q_train_episodes):  # recurrent loop to train the agent
+        for e in range(q_train_episodes):  # recurrent loop to train the agent
             env_state = np.array([1]*state_size)  # environment state: initial - all weights are enabled
             done = False
 
-            local_state = model_state_dict
-            local_params = self._baseline_params
-
             iteration = 0
             while not done or iteration < least_iter_num:  # optimization loop
+                local_state = model_state_dict
+                local_params = self._baseline_params
                 # perform action
                 indices = agent.act(env_state)
 
@@ -390,6 +389,9 @@ class Optimizer:
                     next_state
                 )
                 acc, flops = self._run_test(local_state, local_params)
+                print('Episode: {0} | Iteration: {1} | Acc.: {2} | FLOPS: {3}'.format(
+                    e, iteration, acc, flops
+                ))
 
                 # 3. calculate reward -- measure consequences
                 flops_ratio = (self._baseline_flops - flops) / self._baseline_flops
@@ -408,9 +410,6 @@ class Optimizer:
                 env_state = next_state
 
                 iteration += 1
-                # exit if finished
-                if done:
-                    break
 
             # train the agent
             agent.replay(27)
