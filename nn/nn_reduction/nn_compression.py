@@ -3,6 +3,7 @@
 from __future__ import print_function
 import argparse
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.autograd import Variable
@@ -63,6 +64,9 @@ network_init_params = None
 optimization_data = None
 
 
+cross_entropy_loss = nn.CrossEntropyLoss()
+
+
 def train(model, optimizer, epoch=0):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -71,7 +75,7 @@ def train(model, optimizer, epoch=0):
         data, target = Variable(data), Variable(target)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, target)
+        loss = cross_entropy_loss(output, target)
         loss.backward()
         optimizer.step()
         # if batch_idx % args.log_interval == 0:
@@ -113,6 +117,7 @@ def main_train():
         model.cuda()
 
     for epoch in range(1, args.epochs + 1):
+        print('Epoch: {0}'.format(epoch))
         train(model, optimizer, epoch)
         pass
 
