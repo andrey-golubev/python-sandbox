@@ -2,6 +2,7 @@ import gym
 import gym.spaces
 import time
 import numpy as np
+from sklearn.neural_network import MLPClassifier
 
 
 def generate_session(agent, t_max=10**5):
@@ -9,25 +10,26 @@ def generate_session(agent, t_max=10**5):
     total_reward = 0
 
     s = env.reset()
+    # env.render()
 
     for t in range(t_max):
         # Choose action from policy
         # You can use np.random.choice() func
-        # a = ?
-        a = None
+        probabilities = agent.predict_proba([s])[0]
+        a = np.random.choice(n_actions, p=probabilities)
 
         # Do action `a` to obtain new_state, reward, is_done,
-        new_s, r, is_done = None, None, None
-
-        # Record state, action and add up reward to states, actions and total_reward accordingly.
-        # states
-        # actions
-        # total_reward
-
-        # Update s for new cycle iteration
+        new_s, r, is_done, _ = env.step(a)
 
         if is_done:
             break
+        # Record state, action and add up reward to states, actions and total_reward accordingly.
+        states.append(s)
+        actions.append(a)
+        total_reward += r
+
+        # Update s for new cycle iteration
+        s = new_s
 
     return states, actions, total_reward
 
@@ -50,13 +52,13 @@ def select_elites(states_batch, actions_batch, rewards_batch, percentile=50):
     states_batch, actions_batch, rewards_batch = map(np.array, [states_batch, actions_batch, rewards_batch])
 
     # Compute reward threshold
-    reward_threshold = None
+    reward_threshold = np.percentile(rewards_batch, percentile)
 
     # Compute elite states using reward threshold
-    elite_states = None
+    elite_states = states_batch[rewards_batch >= reward_threshold]
 
     # Compute elite actions using reward threshold
-    elite_actions = None
+    elite_actions = actions_batch[rewards_batch >= reward_threshold]
 
     elite_states, elite_actions = map(np.concatenate, [elite_states, elite_actions])
 
@@ -66,20 +68,19 @@ def select_elites(states_batch, actions_batch, rewards_batch, percentile=50):
 def rl_approx_cross_entropy(nn_agent):
     n_sessions = 100
     percentile = 70
-    total_iterations = 100
+    total_iterations = 200
     log = []
 
     for i in range(total_iterations):
-
         # Generate n_sessions for further analysis.
-        sessions = None
+        sessions = [generate_session(nn_agent) for _ in range(n_sessions)]
         states_batch, actions_batch, rewards_batch = map(np.array, zip(*sessions))
 
         # Select elite states & actions.
-        elite_states, elite_actions = None, None
+        elite_states, elite_actions = select_elites(states_batch, actions_batch, rewards_batch, percentile=percentile)
 
         # Update policy using elite_states, elite_actions.
-        # nn_agent
+        nn_agent.fit(elite_states, elite_actions)
 
         # Info for debugging
         mean_reward = np.mean(rewards_batch)
@@ -97,13 +98,14 @@ def test_rl_approx_cross_entropy(nn_agent):
     s = env.reset()
     total_reward = 0
     for t in range(1000):
+        # env.render()
         # Choose action from nn_agent
         # You can use np.random.choice() func
-        # a = ?
-        a = None
+        probs =nn_agent.predict_proba([s])[0]
+        a = np.random.choice(n_actions, p=probs)
 
         # Do action `a` to obtain new_state, reward, is_done,
-        new_s, r, is_done = None, None, None
+        new_s, r, is_done, _ = env.step(a)
 
         if is_done:
             break
@@ -111,25 +113,28 @@ def test_rl_approx_cross_entropy(nn_agent):
             env.render()
             time.sleep(0.07)
             total_reward += r
-            # Update s for new cycle iteration
+        # Update s for new cycle iteration
+        s = new_s
 
     print('Reward of Test agent = %.3f' % total_reward)
 
 
 if __name__ == '__main__':
     # Create environment 'CartPole-v0'
-    env = None
+    env = gym.make('CartPole-v0')
     s = env.reset()
 
+    # env.render()
+
     # Compute number of actions for this environment
-    n_actions = None
+    n_actions = env.action_space.n
 
     print('Actions number = %i' % n_actions)
 
     # Create neural network with 2 hidden layers of 10 & 10 neurons each & tanh activations
     # use MLPClassifier from scikit-learn
 
-    agent = None
+    agent = MLPClassifier((10, 10), activation='tanh', warm_start=True)
 
     # Initialize agent to the dimension of state and amount of actions
     agent.fit([s] * n_actions, range(n_actions))
