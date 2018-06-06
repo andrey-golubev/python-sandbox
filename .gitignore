@@ -5,3 +5,7 @@ metastore_db
 __pycache__
 .idea/
 .vscode
+*.code-workspace
+logs/
+videos/
+

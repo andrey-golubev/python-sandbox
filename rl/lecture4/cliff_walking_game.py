@@ -5,6 +5,7 @@ import numpy as np
 from qlearning_agent import QLearningAgent
 from sarsa_agent import SarsaAgent
 from expected_v_sarsa_agent import ExpectedValueSarsaAgent
+from cliff_walking import CliffWalkingEnv
 
 
 def play_and_train(env, agent, t_max=10 ** 4):
@@ -30,23 +31,22 @@ def play_and_train(env, agent, t_max=10 ** 4):
 if __name__ == '__main__':
     max_iterations = 5000
     visualize = False
-    # Create Taxi-v2 env
-    env = gym.make('Taxi-v2')
+    env = CliffWalkingEnv()
     env.reset()
     # env.render()
 
-    n_states = env.env.nS
-    n_actions = env.env.nA
+    n_states = env.nS
+    n_actions = env.nA
 
     print('States number = %i, Actions number = %i' % (n_states, n_actions))
 
     # create q learning agent with
     alpha=0.5
-    epsilon=0.9
-    epsilon_threshold=0.01
+    epsilon=0.2
+    epsilon_threshold=0.1
     discount=0.99
     get_legal_actions = lambda s: range(n_actions)
-    epsilon_ratio = 0.995
+    epsilon_ratio = 0.99
 
     ql_agent = QLearningAgent(alpha, epsilon, discount, get_legal_actions)
     sarsa_agent = SarsaAgent(alpha, epsilon, discount, get_legal_actions)
@@ -70,14 +70,14 @@ if __name__ == '__main__':
             rewards_qlearning.append(play_and_train(env, ql_agent))
             rewards_sarsa.append(play_and_train(env, sarsa_agent))
             rewards_expected_sarsa.append(play_and_train(env, expected_sarsa_agent))
-            print(rewards_qlearning[-1], " ", rewards_sarsa[-1], " ", rewards_expected_sarsa[-1])
+            # print(rewards_qlearning[-1], " ", rewards_sarsa[-1], " ", rewards_expected_sarsa[-1])
             # Decay agent epsilon
             epsilon *= epsilon_ratio
             ql_agent.epsilon = epsilon if epsilon >= epsilon_threshold else epsilon_threshold
             sarsa_agent.epsilon = epsilon if epsilon >= epsilon_threshold else epsilon_threshold
             expected_sarsa_agent.epsilon = epsilon if epsilon >= epsilon_threshold else epsilon_threshold
 
-            if False and i % 100 == 0:
+            if i % 100 == 0:
                 print('Iteration {}, Average reward Q={:.2f} | Sarsa={:.2f} | Expected Value Sarsa={:.2f}, Epsilon {:.3f}'.format(
                     i, np.mean(rewards_qlearning), np.mean(rewards_sarsa), np.mean(rewards_expected_sarsa), ql_agent.epsilon))
 
