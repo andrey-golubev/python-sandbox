@@ -43,10 +43,13 @@ def __roi(size_with_ratio, out_size):
     return box
 
 
+def path_join(left, right):
+    """join"""
+    return os.path.join(left, right)
+
+
 def preprocess_images(image_dir, out_size):
     """preprocess images"""
-    def path_join(left, right):
-        return os.path.join(left, right)
 
     if not __square(out_size):
         raise NotImplementedError
@@ -69,3 +72,21 @@ def preprocess_images(image_dir, out_size):
             bad_files.append(file)
     # 3. return tuples list and list of bad images (for debug primarily)
     return good_images, bad_files
+
+def remove_bad_files(image_dir):
+    """remove files that are not images"""
+    files = os.listdir(image_dir)
+    for f in files:
+        f = path_join(image_dir, f)
+        fp = open(f, "rb")
+        try:
+            img = Image.open(fp)
+        except IOError:
+            fp.close()
+            os.remove(f)
+
+
+if __name__ == "__main__":
+    import sys
+    d = sys.argv[1]
+    remove_bad_files(d)
