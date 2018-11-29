@@ -8,4 +8,5 @@ __pycache__
 *.code-workspace
 logs/
 videos/
-
+*.pth
+_data
